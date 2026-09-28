@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from _pytest.capture import CaptureFixture
+
 from research_graph.logging_setup import setup_logging
 
 
@@ -14,7 +16,7 @@ def test_no_duplicate_handlers() -> None:
     assert len(logging.getLogger().handlers) == 1
 
 
-def test_logs_go_to_stderr(capsys) -> None:
+def test_logs_go_to_stderr(capsys: CaptureFixture[str]) -> None:
     """Логи идут в stderr, а не в stdout."""
     setup_logging("INFO")
     logging.getLogger("research_graph.test").info("hello")

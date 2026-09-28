@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from typer.testing import CliRunner
 
@@ -41,7 +43,9 @@ def test_check_config_not_set() -> None:
     assert "<not set>" in result.stdout
 
 
-def test_check_config_verbose_creates_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_check_config_verbose_creates_data_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     target = tmp_path / "data-x"
     monkeypatch.setenv("RG_DATA_DIR", str(target))
     result = runner.invoke(app, ["check-config", "--verbose"])
