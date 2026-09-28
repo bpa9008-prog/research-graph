@@ -112,18 +112,6 @@ def test_token_masking_without_prefix() -> None:
     assert s.masked_token() == "abc****1234"
 
 
-def test_masked_token_when_not_set() -> None:
-    """masked_token() без токена возвращает '<not set>'."""
-    s = Settings(_env_file=None)
-    assert s.masked_token() == "<not set>"
-
-
-def test_token_masking_without_prefix() -> None:
-    """Токен без подчёркивания: маска сохраняет первые 3 и последние 4 символа."""
-    s = Settings(_env_file=None, github_token="abcdefghij1234")
-    assert s.masked_token() == "abc****1234"
-
-
 def test_get_settings_is_cached() -> None:
     """Повторный вызов get_settings() без сброса кэша возвращает тот же объект."""
     _reset_settings_cache()
