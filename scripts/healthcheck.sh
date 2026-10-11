@@ -21,6 +21,22 @@ delay=${HEALTHCHECK_DELAY:-10}
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+# Python нужен только для разбора индекса поиска. На Windows-runner python3
+# бывает заглушкой Microsoft Store, поэтому проверяем, что он реально запускается.
+py=
+for c in python3 python; do
+  if "$c" -c '' 2> /dev/null; then py=$c; break; fi
+done
+
+search_docs() { # $1 — файл индекса; печатает число записей, код 1 — не индекс
+  if [[ -n $py ]]; then
+    "$py" -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); assert d["docs"]; print(len(d["docs"]))' "$1" 2> /dev/null
+  else
+    # Без Python — грубая проверка: JSON-объект с непустым массивом docs.
+    head -c 1 "$1" | grep -q '{' && grep -q '"docs": *\[ *{' "$1" && echo "?"
+  fi
+}
+
 fetch() { # $1 — путь от базового URL, $2 — файл для тела; печатает код ответа
   curl -sS -L --max-time 30 -o "$2" -w '%{http_code}' \
     -H 'Cache-Control: no-cache' "${base}$1?hc=$(date +%s)" 2> "$tmp/curl.err" || echo 000
@@ -43,8 +59,9 @@ check() {
   echo "✓ контрольная строка: rg-build=$sha"
 
   code=$(fetch "search/search_index.json" "$tmp/search.json")
-  if [[ $code == 200 ]] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["docs"]' "$tmp/search.json" 2> /dev/null; then
-    echo "✓ индекс поиска: $(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["docs"]))' "$tmp/search.json") записей"
+  local docs
+  if [[ $code == 200 ]] && docs=$(search_docs "$tmp/search.json"); then
+    echo "✓ индекс поиска: $docs записей"
   else
     echo "✗ индекс поиска: HTTP $code или не JSON"; fail=1
   fi

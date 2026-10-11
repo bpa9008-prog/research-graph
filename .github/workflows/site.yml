@@ -12,6 +12,13 @@
 #   * в job доставки нет сторонних actions — только свои скрипты и actions/*;
 #   * данные из события (имя ветки и т.п.) попадают в shell через env, а не
 #     подстановкой ${{ }} в текст скрипта — это защита от script injection.
+#
+# Где выполняются job:
+#   * сборка и GitHub Pages — GitHub-hosted runner (ubuntu);
+#   * всё, что ходит на Helios по SSH, — self-hosted runner с меткой helios.
+#     Helios сбрасывает SSH-соединения с зарубежных IP, а GitHub-hosted runners
+#     работают в зарубежных дата-центрах (docs/report/debugging.md#e10).
+#     На self-hosted runner не попадают job, запускаемые по pull_request.
 name: Site
 
 on:
@@ -175,8 +182,14 @@ jobs:
     if: >-
       needs.build.outputs.helios_url != '' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
+    # Self-hosted runner с российским IP (см. шапку). Если runner выключен,
+    # job ждёт его в очереди, а GitHub Pages публикуется независимо.
+    runs-on: [self-hosted, helios]
     timeout-minutes: 15
+    defaults:
+      run:
+        # На Windows-runner это Git Bash, на Linux/WSL — обычный bash.
+        shell: bash
     environment:
       name: helios
       url: ${{ needs.build.outputs.helios_url }}
@@ -199,28 +212,28 @@ jobs:
           name: site-helios
           path: _site/helios
 
+      - name: Окружение runner
+        run: |
+          uname -a
+          for t in ssh tar rsync curl python3 python; do
+            printf '%-8s %s\n' "$t" "$(command -v "$t" || echo нет)"
+          done
+
       - name: SSH-ключ и known_hosts
         env:
           SSH_KEY: ${{ secrets.HELIOS_SSH_KEY }}
           KNOWN_HOSTS: ${{ vars.HELIOS_KNOWN_HOSTS }}
-        run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/helios_deploy
-          chmod 600 ~/.ssh/helios_deploy
-          # Ключ хоста заранее сверен вручную и хранится в переменной репозитория.
-          # ssh-keyscan здесь НЕ используется: он доверяет первому ответившему.
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts_helios
-          ssh-keygen -lf ~/.ssh/known_hosts_helios
+        run: bash scripts/ci-ssh-key.sh setup
 
       - name: Выкладка на Helios
         id: deploy
         run: |
           id="$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA::7}-r${GITHUB_RUN_ATTEMPT}"
-          scripts/helios.sh deploy "$TARGET" _site/helios "$id"
+          bash scripts/helios.sh deploy "$TARGET" _site/helios "$id"
 
       - name: Healthcheck Helios
         id: health
-        run: scripts/healthcheck.sh "$URL" "$GITHUB_SHA"
+        run: bash scripts/healthcheck.sh "$URL" "$GITHUB_SHA"
 
       - name: Автоматический откат при провале healthcheck
         if: failure() && steps.deploy.outcome == 'success' && steps.deploy.outputs.previous != ''
@@ -228,7 +241,7 @@ jobs:
           PREVIOUS: ${{ steps.deploy.outputs.previous }}
         run: |
           echo "::warning::Healthcheck не пройден — возвращаю релиз $PREVIOUS"
-          scripts/helios.sh rollback "$TARGET" "$PREVIOUS"
+          bash scripts/helios.sh rollback "$TARGET" "$PREVIOUS"
 
       - name: Итоги
         if: always()
@@ -247,13 +260,19 @@ jobs:
             echo
             echo "Адрес: $URL"
           } >> "$GITHUB_STEP_SUMMARY"
-          rm -f ~/.ssh/helios_deploy
+
+      - name: Удаление ключа
+        if: always()
+        run: bash scripts/ci-ssh-key.sh cleanup
 
   helios-manage:
     # Ручной откат и просмотр релизов: Actions → Site → Run workflow.
     if: github.event_name == 'workflow_dispatch' && inputs.action != 'deploy'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, helios]
     timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
     environment: helios
     env:
       HELIOS_HOST: ${{ vars.HELIOS_HOST }}
@@ -273,25 +292,27 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.HELIOS_SSH_KEY }}
           KNOWN_HOSTS: ${{ vars.HELIOS_KNOWN_HOSTS }}
-        run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/helios_deploy && chmod 600 ~/.ssh/helios_deploy
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts_helios
+        run: bash scripts/ci-ssh-key.sh setup
       - name: ${{ inputs.action }} ${{ inputs.target }}
         run: |
           if [[ $ACTION == rollback ]]; then
-            scripts/helios.sh rollback "$TARGET" $RELEASE
+            bash scripts/helios.sh rollback "$TARGET" $RELEASE
           fi
-          scripts/helios.sh list "$TARGET" | tee -a "$GITHUB_STEP_SUMMARY"
-          rm -f ~/.ssh/helios_deploy
+          bash scripts/helios.sh list "$TARGET" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Удаление ключа
+        if: always()
+        run: bash scripts/ci-ssh-key.sh cleanup
 
   helios-remove-preview:
     # Ветку удалили — её preview больше не нужен.
     # В if: переменные окружения helios ещё не видны (HELIOS_HOST всегда пуст),
     # поэтому проверяем HELIOS_BASE_URL уровня репозитория.
     if: github.event_name == 'delete' && github.event.ref_type == 'branch' && vars.HELIOS_BASE_URL != ''
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, helios]
     timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
     environment: helios
     env:
       HELIOS_HOST: ${{ vars.HELIOS_HOST }}
@@ -309,13 +330,12 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.HELIOS_SSH_KEY }}
           KNOWN_HOSTS: ${{ vars.HELIOS_KNOWN_HOSTS }}
-        run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/helios_deploy && chmod 600 ~/.ssh/helios_deploy
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts_helios
+        run: bash scripts/ci-ssh-key.sh setup
       - name: Удаление preview
         run: |
           slug=$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]' \
             | sed 's/[^a-z0-9._-]/-/g; s/^[.-]*//' | cut -c1-40)
-          scripts/helios.sh remove-preview "$slug"
-          rm -f ~/.ssh/helios_deploy
+          bash scripts/helios.sh remove-preview "$slug"
+      - name: Удаление ключа
+        if: always()
+        run: bash scripts/ci-ssh-key.sh cleanup
