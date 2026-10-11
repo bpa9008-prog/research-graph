@@ -298,7 +298,12 @@ jobs:
           if [[ $ACTION == rollback ]]; then
             bash scripts/helios.sh rollback "$TARGET" $RELEASE
           fi
-          bash scripts/helios.sh list "$TARGET" | tee -a "$GITHUB_STEP_SUMMARY"
+          # В блоке кода: иначе сводка разбирает пометку «* релиз» как список.
+          {
+            echo '```text'
+            bash scripts/helios.sh list "$TARGET"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Удаление ключа
         if: always()
         run: bash scripts/ci-ssh-key.sh cleanup
