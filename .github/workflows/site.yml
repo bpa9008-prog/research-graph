@@ -1,0 +1,319 @@
+# Сборка и публикация сайта: GitHub Pages + Helios ИТМО.
+#
+#   push в master          → build → GitHub Pages + Helios (корень) → healthcheck
+#   push в другую ветку    → build → Helios preview/<ветка>/       → healthcheck
+#   pull_request в master  → только build (секреты недоступны, деплоя нет)
+#   удаление ветки         → удалить preview/<ветка>/ на Helios
+#   ручной запуск          → откат или список релизов на Helios
+#
+# Принципы безопасности (подробно — docs/report/t4-security.md):
+#   * все actions зафиксированы по SHA коммита, рядом — версия в комментарии;
+#   * job сборки не получает никаких секретов и прав на запись;
+#   * в job доставки нет сторонних actions — только свои скрипты и actions/*;
+#   * данные из события (имя ветки и т.п.) попадают в shell через env, а не
+#     подстановкой ${{ }} в текст скрипта — это защита от script injection.
+name: Site
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore: ["src/**", "tests/**", "uv.lock"]
+  pull_request:
+    branches: [master]
+  delete:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Что сделать на Helios"
+        type: choice
+        options: [list, rollback, deploy]
+        default: list
+      target:
+        description: "Цель: main или preview/<ветка>"
+        default: main
+      release:
+        description: "id релиза для отката (пусто — предыдущий)"
+        default: ""
+
+permissions:
+  contents: read
+
+# Выкладки одной ветки идут строго по очереди и не прерываются на середине.
+concurrency:
+  group: site-${{ github.event_name == 'delete' && 'delete' || github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  PAGES_URL: https://bpa9008-prog.github.io/research-graph/
+
+jobs:
+  build:
+    if: >-
+      github.event_name == 'push' || github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      target: ${{ steps.meta.outputs.target }}
+      helios_url: ${{ steps.meta.outputs.helios_url }}
+      deploy_pages: ${{ steps.meta.outputs.deploy_pages }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false # токен не остаётся в .git/config
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+
+      - name: Установка MkDocs (точные версии)
+        run: python -m pip install -r requirements-docs.txt
+
+      - name: Куда публиковать
+        id: meta
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.head_ref || github.ref_name }}
+          HELIOS_BASE_URL: ${{ vars.HELIOS_BASE_URL }}
+        run: |
+          if [[ $REF_NAME == master ]]; then
+            target=main; suffix=
+          else
+            # Имя ветки → безопасное имя каталога: feature/T4 → feature-t4
+            slug=$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' \
+              | sed 's/[^a-z0-9._-]/-/g; s/^[.-]*//' | cut -c1-40)
+            target="preview/$slug"; suffix="preview/$slug/"
+          fi
+          deploy_pages=false
+          if [[ $EVENT == push && $REF_NAME == master ]]; then deploy_pages=true; fi
+          helios_url=
+          if [[ -n $HELIOS_BASE_URL ]]; then helios_url="${HELIOS_BASE_URL%/}/$suffix"; fi
+          {
+            echo "target=$target"
+            echo "helios_url=$helios_url"
+            echo "deploy_pages=$deploy_pages"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      - name: Сборка для GitHub Pages (--strict)
+        env:
+          SITE_URL: ${{ env.PAGES_URL }}
+          BUILD_SHA: ${{ github.sha }}
+          BUILD_REF: ${{ github.head_ref || github.ref_name }}
+          BUILD_TARGET: github-pages
+        run: |
+          export BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M UTC')
+          t0=$(date +%s.%N)
+          mkdocs build --strict --site-dir _site/pages
+          t=$(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b-a}')
+          echo "| Сборка (Pages) | $t с | $(du -sh _site/pages | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Сборка для Helios (--strict)
+        if: steps.meta.outputs.helios_url != ''
+        env:
+          SITE_URL: ${{ steps.meta.outputs.helios_url }}
+          BUILD_SHA: ${{ github.sha }}
+          BUILD_REF: ${{ github.head_ref || github.ref_name }}
+          BUILD_TARGET: helios
+        run: |
+          export BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M UTC')
+          t0=$(date +%s.%N)
+          mkdocs build --strict --site-dir _site/helios
+          t=$(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b-a}')
+          echo "| Сборка (Helios) | $t с | $(du -sh _site/helios | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Нет внешних CDN
+        run: python scripts/check_offline.py _site/pages
+
+      - name: Артефакт для GitHub Pages
+        if: steps.meta.outputs.deploy_pages == 'true'
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: _site/pages
+
+      - name: Артефакт для Helios
+        if: steps.meta.outputs.helios_url != '' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: site-helios
+          path: _site/helios
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy-pages:
+    needs: build
+    if: needs.build.outputs.deploy_pages == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Права только этому job и только на время его работы.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Публикация на GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: Healthcheck GitHub Pages
+        env:
+          URL: ${{ steps.deploy.outputs.page_url }}
+          SHA: ${{ github.sha }}
+        run: scripts/healthcheck.sh "$URL" "$SHA"
+
+  deploy-helios:
+    needs: build
+    if: >-
+      needs.build.outputs.helios_url != '' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: helios
+      url: ${{ needs.build.outputs.helios_url }}
+    env:
+      HELIOS_HOST: ${{ vars.HELIOS_HOST }}
+      HELIOS_PORT: ${{ vars.HELIOS_PORT }}
+      HELIOS_USER: ${{ vars.HELIOS_USER }}
+      HELIOS_WEB_DIR: ${{ vars.HELIOS_WEB_DIR }}
+      HELIOS_MODE: ${{ vars.HELIOS_MODE }}
+      TARGET: ${{ needs.build.outputs.target }}
+      URL: ${{ needs.build.outputs.helios_url }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: site-helios
+          path: _site/helios
+
+      - name: SSH-ключ и known_hosts
+        env:
+          SSH_KEY: ${{ secrets.HELIOS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.HELIOS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/helios_deploy
+          chmod 600 ~/.ssh/helios_deploy
+          # Ключ хоста заранее сверен вручную и хранится в переменной репозитория.
+          # ssh-keyscan здесь НЕ используется: он доверяет первому ответившему.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts_helios
+          ssh-keygen -lf ~/.ssh/known_hosts_helios
+
+      - name: Выкладка на Helios
+        id: deploy
+        run: |
+          id="$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA::7}-r${GITHUB_RUN_ATTEMPT}"
+          scripts/helios.sh deploy "$TARGET" _site/helios "$id"
+
+      - name: Healthcheck Helios
+        id: health
+        run: scripts/healthcheck.sh "$URL" "$GITHUB_SHA"
+
+      - name: Автоматический откат при провале healthcheck
+        if: failure() && steps.deploy.outcome == 'success' && steps.deploy.outputs.previous != ''
+        env:
+          PREVIOUS: ${{ steps.deploy.outputs.previous }}
+        run: |
+          echo "::warning::Healthcheck не пройден — возвращаю релиз $PREVIOUS"
+          scripts/helios.sh rollback "$TARGET" "$PREVIOUS"
+
+      - name: Итоги
+        if: always()
+        env:
+          RELEASE: ${{ steps.deploy.outputs.release }}
+          METHOD: ${{ steps.deploy.outputs.method }}
+          UPLOAD_S: ${{ steps.deploy.outputs.upload_seconds }}
+          TOTAL_S: ${{ steps.deploy.outputs.total_seconds }}
+          HEALTH: ${{ steps.health.outcome }}
+        run: |
+          {
+            echo "### Helios: $TARGET"
+            echo "| Релиз | Способ | Загрузка | Всего | Healthcheck |"
+            echo "|---|---|---|---|---|"
+            echo "| \`$RELEASE\` | $METHOD | ${UPLOAD_S} с | ${TOTAL_S} с | $HEALTH |"
+            echo
+            echo "Адрес: $URL"
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f ~/.ssh/helios_deploy
+
+  helios-manage:
+    # Ручной откат и просмотр релизов: Actions → Site → Run workflow.
+    if: github.event_name == 'workflow_dispatch' && inputs.action != 'deploy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: helios
+    env:
+      HELIOS_HOST: ${{ vars.HELIOS_HOST }}
+      HELIOS_PORT: ${{ vars.HELIOS_PORT }}
+      HELIOS_USER: ${{ vars.HELIOS_USER }}
+      HELIOS_WEB_DIR: ${{ vars.HELIOS_WEB_DIR }}
+      HELIOS_MODE: ${{ vars.HELIOS_MODE }}
+      ACTION: ${{ inputs.action }}
+      TARGET: ${{ inputs.target }}
+      RELEASE: ${{ inputs.release }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - name: SSH-ключ и known_hosts
+        env:
+          SSH_KEY: ${{ secrets.HELIOS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.HELIOS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/helios_deploy && chmod 600 ~/.ssh/helios_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts_helios
+      - name: ${{ inputs.action }} ${{ inputs.target }}
+        run: |
+          if [[ $ACTION == rollback ]]; then
+            scripts/helios.sh rollback "$TARGET" $RELEASE
+          fi
+          scripts/helios.sh list "$TARGET" | tee -a "$GITHUB_STEP_SUMMARY"
+          rm -f ~/.ssh/helios_deploy
+
+  helios-remove-preview:
+    # Ветку удалили — её preview больше не нужен.
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch' && vars.HELIOS_HOST != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: helios
+    env:
+      HELIOS_HOST: ${{ vars.HELIOS_HOST }}
+      HELIOS_PORT: ${{ vars.HELIOS_PORT }}
+      HELIOS_USER: ${{ vars.HELIOS_USER }}
+      HELIOS_WEB_DIR: ${{ vars.HELIOS_WEB_DIR }}
+      HELIOS_MODE: ${{ vars.HELIOS_MODE }}
+      BRANCH: ${{ github.event.ref }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - name: SSH-ключ и known_hosts
+        env:
+          SSH_KEY: ${{ secrets.HELIOS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.HELIOS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/helios_deploy && chmod 600 ~/.ssh/helios_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts_helios
+      - name: Удаление preview
+        run: |
+          slug=$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]' \
+            | sed 's/[^a-z0-9._-]/-/g; s/^[.-]*//' | cut -c1-40)
+          scripts/helios.sh remove-preview "$slug"
+          rm -f ~/.ssh/helios_deploy
