@@ -5,6 +5,7 @@
 Silver/Gold. На текущем этапе (ЛР1) реализованы конфигурация, логирование и CLI.
 
 ![CI](https://github.com/bpa9008-prog/research-graph/actions/workflows/ci.yml/badge.svg)
+![Site](https://github.com/bpa9008-prog/research-graph/actions/workflows/site.yml/badge.svg)
 
 ## Требования
 
@@ -73,3 +74,27 @@ RG_MAX_CONCURRENCY   | 4            | Максимум одновременны�
     ├── .env.example
     ├── pyproject.toml
     └── uv.lock
+
+## Сайт с отчётом
+
+Отчёт о публикации результатов генератором статических сайтов собран
+MkDocs Material из каталога docs/ и публикуется workflow Site:
+
+- GitHub Pages: https://bpa9008-prog.github.io/research-graph/
+- Helios ИТМО: адрес задаётся переменной репозитория HELIOS_BASE_URL
+
+Локальная сборка (отдельное окружение, зависимости пакета не нужны):
+
+    python -m venv .venv-docs && source .venv-docs/bin/activate
+    pip install -r requirements-docs.txt
+    mkdocs serve                    # предпросмотр
+    mkdocs build --strict           # как в CI
+    python scripts/check_offline.py site
+
+Выкладка на Helios, откат и preview веток описаны на странице
+«P4. Развёртывание на Helios» и в комментариях scripts/helios.sh.
+
+## Лицензии
+
+Код — MIT (LICENSE), текст сайта — CC BY 4.0 (LICENSE-CONTENT.md),
+MathJax в docs/assets/vendor/mathjax — Apache 2.0.
