@@ -24,6 +24,9 @@ packages = ["src/research_graph"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# ruff >= 0.16 форматирует блоки кода в Markdown: в docs/ он ломает
+# вставки pymdownx.snippets (--8<-- "файл") и примеры в отчёте.
+extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP", "SIM"]

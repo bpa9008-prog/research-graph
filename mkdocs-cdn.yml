@@ -1,0 +1,15 @@
+# Контрольный вариант для эксперимента T4 «сайт при недоступности CDN».
+# Повторяет типовую конфигурацию из документации Material: шрифты Roboto
+# с Google Fonts и MathJax с cdn.jsdelivr.net. В CI не публикуется.
+#
+#   mkdocs build -f mkdocs-cdn.yml -d site-cdn
+INHERIT: mkdocs.yml
+
+theme:
+  font:
+    text: Roboto
+    code: Roboto Mono
+
+extra_javascript:
+  - assets/javascripts/mathjax-config.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js

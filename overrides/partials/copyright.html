@@ -1,0 +1,16 @@
+{#- Переопределение partials/copyright.html: лицензии и метка версии сборки. -#}
+<div class="md-copyright">
+  {% if config.copyright %}
+    <div class="md-copyright__highlight">{{ config.copyright }}</div>
+  {% endif %}
+  {% set b = config.extra.build %}
+  <div class="rg-build-label">
+    Сборка
+    {% if b.sha != "local" -%}
+      <a href="{{ config.repo_url }}/commit/{{ b.sha }}"><code>{{ b.sha[:7] }}</code></a>
+    {%- else -%}
+      <code>local</code>
+    {%- endif %}
+    · ветка <code>{{ b.ref }}</code> · {{ b.date }} · {{ b.target }}
+  </div>
+</div>

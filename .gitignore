@@ -26,3 +26,9 @@ data/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# --- сайт (MkDocs) ---
+site/
+_site/
+site-cdn/
+.cache/

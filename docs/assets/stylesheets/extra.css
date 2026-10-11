@@ -1,0 +1,16 @@
+/* Метка сборки в подвале. */
+.rg-build-label {
+  margin-top: 0.3rem;
+  opacity: 0.75;
+  font-size: 0.6rem;
+}
+
+/* Таблицы замеров: числа выравниваются по разрядам. */
+.md-typeset table:not([class]) td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Широкие таблицы на телефоне прокручиваются внутри себя, а не всей страницей. */
+.md-typeset__table {
+  max-width: 100%;
+}
