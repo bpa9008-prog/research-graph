@@ -390,8 +390,9 @@ Markdown. Для Markdown `* ` в начале строки — пункт сп�
 [Site](https://github.com/bpa9008-prog/research-graph/actions/runs/38146949021),
 [CI](https://github.com/bpa9008-prog/research-graph/actions/runs/38146948979).
 
-⟨заполнить по первым запускам на self-hosted runner: текст ошибки из лога,
-гипотеза, проверка, решение. Частые кандидаты — `403 Forbidden` на
-`/~s566109/rg/` (веб-сервер не ходит по символическим ссылкам →
-`HELIOS_MODE=swap`), `Permission denied (publickey)` (ключ в секрете вставлен
-не целиком).⟩
+Запуски на self-hosted runner дали две ошибки, они разобраны выше:
+[13](#e13) (runner прерван посреди job) и [14](#e14) (сводка ручного отката
+свёрстана как список). Ошибки `Permission denied (publickey)` и `403` на
+каталоге релиза не возникли: ключ и права были подготовлены заранее
+([10](#e10), [11](#e11)), а веб-сервер Helios ходит по символическим ссылкам —
+режим `symlink` заработал без `HELIOS_MODE=swap`.

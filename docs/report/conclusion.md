@@ -42,9 +42,9 @@
 хоста. Выкладка на Helios перенесена на self-hosted runner, потому что Helios
 не принимает SSH из-за рубежа ([ошибка 10](debugging.md#e10)).
 
-⟨Осталось: запуски на Helios через self-hosted runner и их скриншоты, времена
-доставки на Helios в таблице [P4](p4-helios.md), ошибки этих запусков в
-[Отладке](debugging.md#ci).⟩
+Выполнено в CI: успешная выкладка на Pages и Helios, preview ветки и его
+автоматическое удаление, проваленный healthcheck с автооткатом, ручной откат.
+Ссылки на запуски и скриншоты — в [P4](p4-helios.md#ci-runs).
 
 Следующее улучшение безопасности — ограничить ключ Helios одной командой
 через `command=` в `authorized_keys` (см. [T4](t4-security.md#methods)).

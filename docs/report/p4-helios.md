@@ -227,7 +227,7 @@ rsync в среде подготовки не было: `ssh` заменён о�
 | Запуск | Ссылка | Результат |
 |---|---|---|
 | Успешная выкладка `master` | [запуск, попытка 2](https://github.com/bpa9008-prog/research-graph/actions/runs/38151860177/attempts/2) | релиз `20261011T155404Z-d8094bf-r2`, healthcheck success; скриншот ниже |
-| Preview ветки | ⟨заполнить⟩ | ⟨скриншот⟩ |
+| Preview ветки | [запуск #6](https://github.com/bpa9008-prog/research-graph/actions/runs/38154254987), удаление — [запуск #7](https://github.com/bpa9008-prog/research-graph/actions/runs/38154705131) | push ветки `preview-demo` → `…/rg/preview/preview-demo/` за 34 с (job `deploy-pages` пропущен: Pages только для `master`), healthcheck по адресу preview прошёл, баннер «Preview-сборка» на месте. Удаление ветки → job `helios-remove-preview` за 26 с, адрес отдаёт 404 |
 | Намеренно проваленный healthcheck → автооткат | [запуск #3](https://github.com/bpa9008-prog/research-graph/actions/runs/38153530073) | `HELIOS_BASE_URL` с опечаткой (`…/rgX/`): выкладка 3 с — success, healthcheck 6 попыток × 404 за 52 с — failure, автооткат на прежний релиз 1 с — success; сайт по верному адресу не прерывался |
 | Ручной откат | [запуск #4](https://github.com/bpa9008-prog/research-graph/actions/runs/38153869340) | Run workflow → `rollback`, цель `main`, релиз не указан: активный `…155404Z-d8094bf-r2` → предыдущий `…154713Z-d8094bf-r1`, job 37 с, без пересборки; в истории на сервере видны автооткат (16:00:24) и ручной откат (16:04:09) |
 
@@ -248,6 +248,10 @@ healthcheck по верному адресу проходит. Значит, а�
 Вывод для healthcheck: контрольная строка из одного хеша коммита не отличает
 пересборки одного коммита. Надёжнее добавить в неё id релиза.
 
+![Preview ветки: выкладка в подкаталог preview/preview-demo/](../assets/img/p4-run-preview.png)
+
+![Удаление ветки: job helios-remove-preview убирает её preview](../assets/img/p4-run-preview-removed.png)
+
 ![Ручной откат: список релизов и история на сервере](../assets/img/p4-run-manual-rollback.png)
 
 На этом скриншоте сводка свёрстана неверно: пометка активного релиза `* `
@@ -260,6 +264,7 @@ healthcheck по верному адресу проходит. Значит, а�
 | Критерий | GitHub Pages (`deploy-pages`) | Helios (SSH, эта схема) |
 |---|---|---|
 | Время доставки, с | 10 (job `deploy-pages`; из них шаг `deploy-pages` 6) после сборки 17; [запуск](https://github.com/bpa9008-prog/research-graph/actions/runs/38146949021) | 2,3 (скрипт выкладки; из них загрузка `tar` 1,0), весь job `deploy-helios` 34; [запуск](https://github.com/bpa9008-prog/research-graph/actions/runs/38151860177/attempts/2) |
+| Кэширование | `Cache-Control: max-age=600` на всё: после выкладки браузер может до 10 мин показывать старую версию | заголовков кэширования нет, браузер перепроверяет файлы |
 | Время до появления новой версии по URL | ⟨заполнить⟩ (CDN GitHub кэширует до ~10 мин) | сразу после `finalize`, кэша нет |
 | Учётные данные в CI | нет хранимых (OIDC) | приватный ключ в секрете |
 | Права при утечке | публикация на Pages | весь аккаунт на Helios |
@@ -271,7 +276,7 @@ healthcheck по верному адресу проходит. Значит, а�
 | Доступ CI к площадке | любой GitHub-hosted runner | SSH только с российских IP → нужен self-hosted runner; веб доступен отовсюду |
 | Зависимость от машины студента | нет | runner должен быть включён во время выкладки |
 | Отладка | логи Actions; доступа к файлам нет | можно зайти по SSH и посмотреть файлы, права, журнал `state/*.history` |
-| Сжатие gzip | да | ⟨проверить: `curl -sI -H 'Accept-Encoding: gzip' …`⟩ |
+| Сжатие gzip | да, включая JS: `tex-svg.js` 2 108 580 → 685 989 Б | HTML и JSON — да (главная 29 602 → 8 581 Б, индекс поиска 247 992 → 65 418 Б); **JavaScript — нет**: `tex-svg.js` уходит целиком, 2 108 580 Б, в 3 раза больше, чем с Pages |
 | Ограничения | 1 ГБ на сайт, 100 ГБ трафика в месяц (мягкие лимиты) | квота домашнего каталога; 5 релизов × ~5 МБ |
 
 ### Объём на сервере
