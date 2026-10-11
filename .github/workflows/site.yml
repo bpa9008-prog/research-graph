@@ -287,7 +287,9 @@ jobs:
 
   helios-remove-preview:
     # Ветку удалили — её preview больше не нужен.
-    if: github.event_name == 'delete' && github.event.ref_type == 'branch' && vars.HELIOS_HOST != ''
+    # В if: переменные окружения helios ещё не видны (HELIOS_HOST всегда пуст),
+    # поэтому проверяем HELIOS_BASE_URL уровня репозитория.
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch' && vars.HELIOS_BASE_URL != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment: helios
