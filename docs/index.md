@@ -9,7 +9,7 @@
 |---|---|
 | Репозиторий | <https://github.com/bpa9008-prog/research-graph> |
 | Сайт на GitHub Pages | <https://bpa9008-prog.github.io/research-graph/> |
-| Сайт на Helios ИТМО | ⟨заполнить: адрес из переменной `HELIOS_BASE_URL`⟩ |
+| Сайт на Helios ИТМО | <https://se.ifmo.ru/~s566109/rg/> |
 | Пайплайн | [`.github/workflows/site.yml`](report/pipelines.md) |
 
 ## Выбранные задания

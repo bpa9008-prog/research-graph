@@ -10,6 +10,7 @@
 | Откат | хранятся 5 последних релизов, автоматический откат при провале healthcheck, ручной — из интерфейса Actions | `scripts/helios-remote.sh`, job `helios-manage` |
 | Устойчивость к обрыву | загрузка в `.partial`, переключение одной операцией после полной загрузки | `scripts/helios-remote.sh` |
 | Уборка | удаление ветки удаляет её preview | job `helios-remove-preview` |
+| Доступ к Helios из CI | job выкладки идут на self-hosted runner с российским IP: Helios не принимает SSH из-за рубежа | `runs-on: [self-hosted, helios]` |
 
 ## Устройство
 
@@ -75,14 +76,18 @@
 ### 1. Deploy-ключ
 
 ```bash
-ssh-keygen -t ed25519 -N '' -C 'github-actions research-graph' -f helios_deploy
+ssh-keygen -t ed25519 -N '' -C 'research-graph deploy (GitHub Actions)' -f helios_deploy
 ```
 
 Открытую часть — на Helios, в `~/.ssh/authorized_keys`, одной строкой с
-ограничениями:
+ограничениями. Заодно создаётся каталог, который отдаёт веб-сервер:
 
-```text
-restrict ssh-ed25519 AAAA…  github-actions research-graph
+```bash
+umask 022
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo 'restrict ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICvx61TBodMtS3JApa8ZE3B6QPePC8BRNsoSNWNRAkDn research-graph deploy (GitHub Actions)' >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+mkdir -p ~/public_html && chmod 755 ~/public_html && chmod o+x ~
 ```
 
 `restrict` запрещает проброс портов и агентов, X11 и терминал. Выкладке они
@@ -92,35 +97,65 @@ restrict ssh-ed25519 AAAA…  github-actions research-graph
 ### 2. Ключ хоста
 
 Порядок получения и сверки описан в [T4](t4-security.md#known-hosts).
-Результат — строка вида `[helios.cs.ifmo.ru]:2222 ssh-ed25519 AAAA…`.
+Результат:
+
+```text
+[helios.cs.ifmo.ru]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILr5dsbF6eEBT5UFKGo1Qe3ina64YppvFELt8Wu+cZM1
+```
 
 ### 3. Окружение `helios` в репозитории
 
 **Settings → Environments → New environment → `helios`**:
 
-| Имя | Тип | Пример значения |
+| Имя | Тип | Значение |
 |---|---|---|
 | `HELIOS_SSH_KEY` | секрет | содержимое файла `helios_deploy` |
-| `HELIOS_KNOWN_HOSTS` | переменная | `[helios.cs.ifmo.ru]:2222 ssh-ed25519 AAAA…` |
+| `HELIOS_KNOWN_HOSTS` | переменная | строка из шага 2 |
 | `HELIOS_HOST` | переменная | `helios.cs.ifmo.ru` |
 | `HELIOS_PORT` | переменная | `2222` |
-| `HELIOS_USER` | переменная | `sXXXXXX` |
+| `HELIOS_USER` | переменная | `s566109` |
 | `HELIOS_WEB_DIR` | переменная | `public_html/rg` (относительно домашнего каталога) |
-| `HELIOS_MODE` | переменная | `symlink` или `swap` |
+| `HELIOS_MODE` | переменная | не задана (`symlink`); `swap`, если веб-сервер не ходит по ссылкам |
 
-`HELIOS_BASE_URL` (публичный адрес каталога `HELIOS_WEB_DIR`) задаётся на
-уровне репозитория, а не окружения: он нужен job сборки, у которого нет
-доступа к окружению `helios`.
+`HELIOS_BASE_URL` = `https://se.ifmo.ru/~s566109/rg/` (публичный адрес каталога
+`HELIOS_WEB_DIR`) задаётся на уровне репозитория, а не окружения: он нужен job
+сборки, у которого нет доступа к окружению `helios`.
 
-!!! tip "Адрес и порт Helios"
-    Адрес SSH, порт и вид публичного URL домашних страниц уточните по
-    инструкции кафедры. Скрипты не содержат ни одного из этих значений: всё
-    задаётся переменными.
+Веб-сервер: `se.ifmo.ru` отвечает заголовком `Server: nginx`, но страницы
+ошибок 403 и 404 — стандартные страницы Apache в `iso-8859-1`. Значит, nginx
+стоит прокси перед Apache, который и отдаёт `~/public_html`.
 
-### 4. Проверка доступа
+### 4. Self-hosted runner { #runner }
+
+GitHub-hosted runners работают за рубежом, а Helios сбрасывает SSH-соединения
+с зарубежных адресов ([Отладка, ошибка 10](debugging.md#e10)). Поэтому три job,
+которые ходят на Helios, выполняются на runner с российским IP.
+
+1. **Settings → Actions → Runners → New self-hosted runner**, ОС — Windows
+   (или Linux для WSL). Выполнить показанные команды загрузки и `config.cmd`;
+   на вопрос о дополнительных метках ответить `helios`, службой не
+   устанавливать.
+2. На Windows нужен [Git for Windows](https://git-scm.com/download/win): из
+   него берутся `bash`, `ssh`, `tar` и `curl`. Запускать runner **из Git Bash**,
+   чтобы эти программы были первыми в `PATH`:
+
+    ```bash
+    cd /c/actions-runner && ./run.cmd
+    ```
+
+   `rsync` в Git for Windows нет, поэтому скрипт выкладки сам переходит на
+   `tar` через `ssh`. Под WSL или Linux будет использован `rsync`.
+3. **Settings → Actions → General → Fork pull request workflows** —
+   «Require approval for all external contributors». Почему это обязательно
+   для публичного репозитория — в [T4](t4-security.md#self-hosted).
+
+Runner запускается на время выкладки. Если он выключен, job ждут в очереди
+(до 24 часов), а сборка и GitHub Pages проходят независимо от него.
+
+### 5. Проверка доступа
 
 ```bash
-HELIOS_HOST=… HELIOS_USER=… HELIOS_PORT=2222 \
+HELIOS_HOST=helios.cs.ifmo.ru HELIOS_USER=s566109 HELIOS_PORT=2222 \
 HELIOS_KEY=./helios_deploy HELIOS_KNOWN_HOSTS=./helios_known_hosts \
   scripts/helios.sh probe
 ```
@@ -204,7 +239,7 @@ healthcheck получит 404, сработает автоматический 
 
 | Критерий | GitHub Pages (`deploy-pages`) | Helios (SSH, эта схема) |
 |---|---|---|
-| Время доставки, с | ⟨из сводки запуска⟩ | ⟨из сводки: загрузка / всего⟩ |
+| Время доставки, с | 10 (job `deploy-pages`; из них шаг `deploy-pages` 6) после сборки 17; [запуск](https://github.com/bpa9008-prog/research-graph/actions/runs/38146949021) | ⟨из сводки: загрузка / всего⟩ |
 | Время до появления новой версии по URL | ⟨заполнить⟩ (CDN GitHub кэширует до ~10 мин) | сразу после `finalize`, кэша нет |
 | Учётные данные в CI | нет хранимых (OIDC) | приватный ключ в секрете |
 | Права при утечке | публикация на Pages | весь аккаунт на Helios |
@@ -213,6 +248,8 @@ healthcheck получит 404, сработает автоматический 
 | Откат | повторный запуск старого workflow (пересборка) | переключение на хранящийся релиз, без пересборки, секунды |
 | Preview веток | нет, одна версия на репозиторий | да, `preview/<ветка>/` |
 | Доступ из России без VPN | ⟨проверить⟩ | да |
+| Доступ CI к площадке | любой GitHub-hosted runner | SSH только с российских IP → нужен self-hosted runner; веб доступен отовсюду |
+| Зависимость от машины студента | нет | runner должен быть включён во время выкладки |
 | Отладка | логи Actions; доступа к файлам нет | можно зайти по SSH и посмотреть файлы, права, журнал `state/*.history` |
 | Сжатие gzip | да | ⟨проверить: `curl -sI -H 'Accept-Encoding: gzip' …`⟩ |
 | Ограничения | 1 ГБ на сайт, 100 ГБ трафика в месяц (мягкие лимиты) | квота домашнего каталога; 5 релизов × ~5 МБ |

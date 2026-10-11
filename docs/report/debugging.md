@@ -242,6 +242,87 @@ ruff — выражение Python, и он «исправляет» её до �
 ruff проверяет код, а не текст отчёта. Проверено: `ruff check .` и
 `ruff format --check .` проходят.
 
+## 10. Helios сбрасывает SSH-соединение до обмена ключами { #e10 }
+
+**Текст ошибки** (и `ssh`, и `ssh-keyscan` с рабочей машины):
+
+```text
+$ ssh -v -p 2222 s566109@helios.cs.ifmo.ru
+debug1: Connecting to helios.cs.ifmo.ru [77.234.196.4] port 2222.
+debug1: Connection established.
+debug1: Local version string SSH-2.0-OpenSSH_10.5
+kex_exchange_identification: read: Connection reset by peer
+Connection reset by 77.234.196.4 port 2222
+```
+
+**Гипотеза.** TCP-соединение устанавливается, но сервер обрывает его ещё до
+SSH-баннера, то есть до проверки ключей и паролей. Значит, дело не в ключе
+или логине, а в фильтре по адресу клиента. Рабочая машина выходит в интернет
+через адрес в США (по ipinfo.io). Вероятно, Helios не принимает SSH с
+зарубежных адресов.
+
+**Проверка.** С другого компьютера, с российского адреса и без VPN, та же
+команда `ssh s566109@helios.cs.ifmo.ru -p 2222` пускает: приглашение к паролю
+и баннер `FreeBSD 14.5-STABLE`. Веб `https://se.ifmo.ru/~s566109/` с
+американского адреса при этом открывается: фильтр стоит только на SSH.
+
+**Решение.** Главное следствие касается не рабочей машины, а CI:
+GitHub-hosted runners работают в зарубежных дата-центрах, поэтому job
+выкладки на них получили бы ту же ошибку при любых ключах. Три job, которые
+ходят на Helios по SSH, переведены на self-hosted runner с российским IP
+(`runs-on: [self-hosted, helios]`). Сборка и Pages остались на GitHub-hosted.
+Риски такого runner разобраны в [T4](t4-security.md#self-hosted). Ключ хоста
+по той же причине получен не через `ssh-keyscan`, а из SSH-сессии
+([T4](t4-security.md#known-hosts)).
+
+## 11. `403 Forbidden` на домашней странице Helios { #e11 }
+
+**Текст ошибки.**
+
+```text
+$ curl -sI https://se.ifmo.ru/~s566109/
+HTTP/1.1 403 Forbidden
+Server: nginx/1.30.4
+Content-Type: text/html; charset=iso-8859-1
+```
+
+**Гипотеза.** Аккаунт существует (для чужого логина `~s566108` ответ 404, а
+не 403), но веб-серверу нечего или нельзя отдать. Либо нет каталога
+`~/public_html`, либо у веб-сервера нет права прохода (`o+x`) по домашнему
+каталогу.
+
+**Проверка.** На Helios `ls -ld ~ ~/public_html` после создания каталога:
+`drwxr-xr-x … /home/studs/s566109` и `drwxr-xr-x … public_html`. До этого
+каталога `public_html` не было.
+
+**Решение.** `mkdir -p ~/public_html && chmod 755 ~/public_html && chmod o+x ~`
+и тестовый `index.html`. После этого `https://se.ifmo.ru/~s566109/` отдаёт 200.
+Скрипт выкладки и так выставляет нужные права на каталоги релизов
+([P4](p4-helios.md#setup)). Но создать сам `public_html` и открыть проход по
+`$HOME` нужно один раз вручную.
+
+## 12. `install -d -m 700` не работает на Windows-runner { #e12 }
+
+**Текст ошибки** (проверка `scripts/ci-ssh-key.sh` в Git Bash, на такой же
+машине, как будущий runner):
+
+```text
+install: cannot change permissions of '/tmp/tmp.FcHNLueHAZ/rt/helios-ssh': Permission denied
+```
+
+**Гипотеза.** Подготовку SSH писали для Ubuntu-runner. На NTFS права POSIX
+эмулируются, и `install -m 700` не может выставить режим каталога. Шаг упал бы
+до выкладки на первом же запуске на self-hosted runner.
+
+**Проверка.** Тот же скрипт с `mkdir -p` и `chmod 700 … || true` проходит:
+пути из `RUNNER_TEMP` вида `C:\…` переводятся в `/c/…` (`cygpath -u`), CRLF из
+секрета удаляются, `ssh -G` видит оба файла, `cleanup` всё удаляет.
+
+**Решение.** Каталог создаётся через `mkdir`, а неудачный `chmod` на Windows
+не считается ошибкой. Там доступ к каталогу определяет ACL профиля
+пользователя runner. Права на сам файл ключа по-прежнему выставляются, и на
+Linux `chmod` выполняется как обычно.
+
 ## Предотвращено до запуска CI
 
 Найдено при чтении конфигурации; воспроизвести можно командой
@@ -255,9 +336,12 @@ ruff проверяет код, а не текст отчёта. Провере�
 
 ## Ошибки при запуске в CI { #ci }
 
-⟨заполнить по первым запускам: текст ошибки из лога, гипотеза, проверка,
-решение. Частые кандидаты — `Host key verification failed` (строка
-known_hosts без `[хост]:порт` при нестандартном порте), `403 Forbidden` на
-Helios (веб-сервер не ходит по символическим ссылкам → `HELIOS_MODE=swap`,
-или нет `o+x` на домашнем каталоге), `Permission denied (publickey)` (ключ
-добавлен не в тот `authorized_keys` или с переносом строки).⟩
+Первые запуски на GitHub (сборка, Pages, workflow `CI`) прошли без ошибок:
+[Site](https://github.com/bpa9008-prog/research-graph/actions/runs/38146949021),
+[CI](https://github.com/bpa9008-prog/research-graph/actions/runs/38146948979).
+
+⟨заполнить по первым запускам на self-hosted runner: текст ошибки из лога,
+гипотеза, проверка, решение. Частые кандидаты — `403 Forbidden` на
+`/~s566109/rg/` (веб-сервер не ходит по символическим ссылкам →
+`HELIOS_MODE=swap`), `Permission denied (publickey)` (ключ в секрете вставлен
+не целиком).⟩

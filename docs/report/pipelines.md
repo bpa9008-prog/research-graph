@@ -17,10 +17,20 @@ search:
 --8<-- ".github/workflows/site.yml"
 ```
 
+## Подготовка SSH на runner
+
+Ключ и `known_hosts` из секрета и переменной окружения `helios` пишутся во
+временный каталог job и удаляются после выкладки. Работает и на Linux, и в Git
+Bash на Windows (self-hosted runner).
+
+```bash linenums="1" title="scripts/ci-ssh-key.sh"
+--8<-- "scripts/ci-ssh-key.sh"
+```
+
 ## Выкладка на Helios: клиентская часть
 
-Выполняется на раннере: подключение по SSH со строгой проверкой ключа хоста,
-загрузка через `rsync --link-dest` или `tar`.
+Выполняется на self-hosted runner: подключение по SSH со строгой проверкой
+ключа хоста, загрузка через `rsync --link-dest` или `tar`.
 
 ```bash linenums="1" title="scripts/helios.sh"
 --8<-- "scripts/helios.sh"

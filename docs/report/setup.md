@@ -111,12 +111,18 @@ python scripts/check_offline.py site
 
 ## 7. Helios ИТМО
 
-1. Активирован аккаунт на Helios: ⟨заполнить: логин `sXXXXXX`⟩.
-2. Создан отдельный deploy-ключ, его открытая часть добавлена в
+1. Активирован аккаунт на Helios: `s566109`. SSH — `helios.cs.ifmo.ru:2222`,
+   сервер FreeBSD 14.5, оболочка bash, `rsync` есть (`/usr/local/bin/rsync`).
+2. Создан каталог `~/public_html` с правами `755` — его отдаёт веб-сервер по
+   адресу `https://se.ifmo.ru/~s566109/`. Сайт лежит в подкаталоге `rg/`.
+3. Создан отдельный deploy-ключ, его открытая часть добавлена в
    `~/.ssh/authorized_keys` на Helios с ограничением `restrict`.
-3. Ключ хоста получен и сверен вручную, сохранён в переменной
-   `HELIOS_KNOWN_HOSTS`.
-4. В репозитории заданы секрет и переменные окружения `helios`.
+4. Ключ хоста сверен по отпечатку (см. [T4](t4-security.md#known-hosts)) и
+   сохранён в переменной `HELIOS_KNOWN_HOSTS`.
+5. В репозитории заданы секрет и переменные окружения `helios`.
+6. Helios сбрасывает SSH-соединения с зарубежных адресов, а GitHub-hosted
+   runners работают за рубежом ([Отладка, ошибка 10](debugging.md#e10)).
+   Поэтому job выкладки выполняются на self-hosted runner с российским IP.
 
 Пошаговая инструкция и разбор вариантов — в [P4](p4-helios.md#setup).
 
@@ -131,7 +137,7 @@ Workflow собирает сайт дважды — для GitHub Pages и дл�
 | Площадка | `site_url` | Где лежит сайт |
 |---|---|---|
 | GitHub Pages | `https://bpa9008-prog.github.io/research-graph/` | подкаталог `/research-graph/` |
-| Helios, основная ветка | `HELIOS_BASE_URL`, например `https://⟨хост⟩/~sXXXXXX/rg/` | подкаталог `~sXXXXXX/rg/` |
+| Helios, основная ветка | `HELIOS_BASE_URL` = `https://se.ifmo.ru/~s566109/rg/` | подкаталог `~s566109/rg/` |
 | Helios, ветка `feature/x` | `HELIOS_BASE_URL` + `preview/feature-x/` | вложенный подкаталог |
 
 `site_url` в `mkdocs.yml` читается из переменной окружения:
@@ -146,7 +152,7 @@ Workflow собирает сайт дважды — для GitHub Pages и дл�
   `href="/~s000000/rg/assets/stylesheets/main…css"`. Со значением для GitHub
   Pages на Helios страница 404 будет искать стили в `/research-graph/assets/`
   и останется без оформления. Чтобы Apache вообще отдавал эту страницу, нужен
-  `.htaccess` с `ErrorDocument 404 /~sXXXXXX/rg/404.html`;
+  `.htaccess` с `ErrorDocument 404 /~s566109/rg/404.html`;
 - **`sitemap.xml` и `<link rel="canonical">`** указывают на другую площадку —
   поисковики считают Helios копией;
 - **ссылки вида `/assets/...`** в Markdown или переопределениях темы ведут в
